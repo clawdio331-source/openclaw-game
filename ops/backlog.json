@@ -1,0 +1,51 @@
+[
+  {
+    "id": "G-001",
+    "title": "Core 60s loop with Trust meter",
+    "status": "READY",
+    "owner": "",
+    "summary": "Implement one-map prototype where the run lasts 60 seconds unless Trust reaches 0.",
+    "acceptance": [
+      "Player can move and use one action button",
+      "Trust meter is visible at all times",
+      "Run ends on timeout or Trust <= 0"
+    ]
+  },
+  {
+    "id": "G-002",
+    "title": "OpenClaw ping system",
+    "status": "READY",
+    "owner": "",
+    "summary": "Add WARN, SAFE, and RISK pings with cooldown and clear VFX.",
+    "acceptance": [
+      "Each ping has distinct color and icon",
+      "Pings are time-limited and have cooldown",
+      "Following a correct ping increases Trust"
+    ]
+  },
+  {
+    "id": "G-003",
+    "title": "First 10-second visual punch",
+    "status": "READY",
+    "owner": "",
+    "summary": "Create gripping visual style for startup and first wave.",
+    "acceptance": [
+      "Immediate moving background or parallax",
+      "Threat telegraphs are readable in under 1 second",
+      "No stutter on base Mac mini target"
+    ]
+  },
+  {
+    "id": "G-004",
+    "title": "Shareable end card",
+    "status": "READY",
+    "owner": "",
+    "summary": "Show score, trust streak, daily seed, and funny fail reason.",
+    "acceptance": [
+      "End card appears after every run",
+      "Contains score, streak, and seed",
+      "Formatted for social screenshot"
+    ]
+  }
+]
+
