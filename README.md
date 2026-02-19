@@ -2,11 +2,14 @@
 
 Short-session 2D prototype for human + OpenClaw agent play.
 
-## Current Prototype (G-001)
+## Current Prototype (G-002)
 
-Implements the core run loop:
+Implements the core run loop plus ping system:
 - move with `WASD` or arrow keys
-- one action button (`Space`) for pulse blast
+- select ping type with `1` (WARN), `2` (SAFE), `3` (RISK)
+- deploy selected ping with one action button (`Space`)
+- pings are cooldown-bound and time-limited with distinct color/icon VFX
+- matching ping-to-threat correctly increases Trust
 - always-visible Trust meter
 - run ends at `60s` or immediately when Trust hits `0`
 
