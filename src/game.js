@@ -5,6 +5,15 @@ import {
   applyTrustDelta,
   advanceRunClock
 } from "./game-logic.js";
+import {
+  PING_TYPES,
+  PING_TYPE_ORDER,
+  PING_COOLDOWN_MS,
+  PING_LIFE_MS,
+  PING_MAX_RADIUS,
+  keyToPingType,
+  applyPingBurstToHazards
+} from "./ping-system.js";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -23,7 +32,6 @@ const endScore = document.getElementById("endScore");
 const WORLD_WIDTH = canvas.width;
 const WORLD_HEIGHT = canvas.height;
 const PLAYER_SPEED = 360;
-const ACTION_COOLDOWN_MS = 1_200;
 const HAZARD_BASE_SPAWN_MS = 900;
 const HAZARD_MIN_SPAWN_MS = 440;
 const TRUST_DRAIN_PER_SECOND = 28;
@@ -33,9 +41,10 @@ const keysDown = new Set();
 let runState = createRunState();
 let runActive = false;
 let hazards = [];
-let pulses = [];
+let pingBursts = [];
 let score = 0;
-let actionCooldownMs = 0;
+let pingCooldownMs = 0;
+let selectedPingType = "warn";
 let spawnAccumulatorMs = 0;
 let lastFrameMs = performance.now();
 let visualClockMs = 0;
@@ -48,13 +57,18 @@ const player = {
 
 window.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
-  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d"].includes(key) || event.key === " ") {
+  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d", "1", "2", "3"].includes(key) || event.key === " ") {
     event.preventDefault();
   }
   keysDown.add(key);
 
+  const chosenType = keyToPingType(key);
+  if (chosenType) {
+    selectedPingType = chosenType;
+  }
+
   if ((key === " " || event.code === "Space") && !event.repeat) {
-    triggerPulse();
+    triggerPing();
   }
 });
 
@@ -72,9 +86,10 @@ function startRun() {
   runState = createRunState();
   runActive = true;
   hazards = [];
-  pulses = [];
+  pingBursts = [];
   score = 0;
-  actionCooldownMs = 0;
+  pingCooldownMs = 0;
+  selectedPingType = "warn";
   spawnAccumulatorMs = 0;
   visualClockMs = 0;
 
@@ -121,10 +136,10 @@ function update(deltaMs) {
   }
 
   updatePlayer(deltaMs);
-  updateActionCooldown(deltaMs);
+  updatePingCooldown(deltaMs);
   spawnHazards(deltaMs);
   updateHazards(deltaMs);
-  updatePulses(deltaMs);
+  updatePingBursts(deltaMs);
 
   if (runState.ended) {
     endRun();
@@ -157,22 +172,23 @@ function updatePlayer(deltaMs) {
   player.y = clamp(player.y, player.radius, WORLD_HEIGHT - player.radius);
 }
 
-function updateActionCooldown(deltaMs) {
-  actionCooldownMs = Math.max(0, actionCooldownMs - deltaMs);
+function updatePingCooldown(deltaMs) {
+  pingCooldownMs = Math.max(0, pingCooldownMs - deltaMs);
 }
 
-function triggerPulse() {
-  if (!runActive || actionCooldownMs > 0) {
+function triggerPing() {
+  if (!runActive || pingCooldownMs > 0) {
     return;
   }
 
-  actionCooldownMs = ACTION_COOLDOWN_MS;
-  pulses.push({
+  pingCooldownMs = PING_COOLDOWN_MS;
+  pingBursts.push({
+    type: selectedPingType,
     x: player.x,
     y: player.y,
     ageMs: 0,
-    lifeMs: 350,
-    maxRadius: 180
+    lifeMs: PING_LIFE_MS,
+    maxRadius: PING_MAX_RADIUS
   });
 }
 
@@ -189,6 +205,7 @@ function spawnHazards(deltaMs) {
 
 function createHazard() {
   const edge = Math.floor(Math.random() * 4);
+  const type = PING_TYPE_ORDER[Math.floor(Math.random() * PING_TYPE_ORDER.length)];
   let x = 0;
   let y = 0;
 
@@ -206,8 +223,14 @@ function createHazard() {
     y = Math.random() * WORLD_HEIGHT;
   }
 
-  const speed = 130 + Math.random() * 75;
+  const speedByType = {
+    warn: 138,
+    safe: 124,
+    risk: 156
+  };
+  const speed = (speedByType[type] ?? 135) + Math.random() * 62;
   return {
+    type,
     x,
     y,
     vx: 0,
@@ -256,35 +279,35 @@ function updateHazards(deltaMs) {
   }
 }
 
-function updatePulses(deltaMs) {
-  for (const pulse of pulses) {
-    pulse.ageMs += deltaMs;
+function updatePingBursts(deltaMs) {
+  for (const burst of pingBursts) {
+    burst.ageMs += deltaMs;
   }
 
-  pulses = pulses.filter((pulse) => pulse.ageMs < pulse.lifeMs);
+  pingBursts = pingBursts.filter((burst) => burst.ageMs < burst.lifeMs);
 
-  if (pulses.length === 0 || hazards.length === 0) {
+  if (pingBursts.length === 0 || hazards.length === 0) {
     return;
   }
 
-  const survivors = [];
-  for (const hazard of hazards) {
-    let removed = false;
-    for (const pulse of pulses) {
-      const radius = (pulse.ageMs / pulse.lifeMs) * pulse.maxRadius;
-      const dist = Math.hypot(hazard.x - pulse.x, hazard.y - pulse.y);
-      if (dist <= radius + hazard.radius) {
-        removed = true;
-        score += 1;
-        runState = applyTrustDelta(runState, 1.5);
-        break;
+  for (const burst of pingBursts) {
+    const radius = (burst.ageMs / burst.lifeMs) * burst.maxRadius;
+    const result = applyPingBurstToHazards(hazards, {
+      x: burst.x,
+      y: burst.y,
+      type: burst.type,
+      radius
+    });
+
+    if (result.clearedCount > 0) {
+      hazards = result.hazards;
+      score += result.clearedCount;
+      runState = applyTrustDelta(runState, result.trustDelta);
+      if (runState.ended) {
+        return;
       }
     }
-    if (!removed) {
-      survivors.push(hazard);
-    }
   }
-  hazards = survivors;
 }
 
 function updateHud() {
@@ -301,8 +324,9 @@ function render() {
   ctx.clearRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   drawBackground();
   drawArenaFrame();
+  drawPingLegend();
   drawHazards();
-  drawPulses();
+  drawPingBursts();
   drawPlayer();
   drawOverlayText();
 }
@@ -345,39 +369,53 @@ function drawArenaFrame() {
 
 function drawHazards() {
   for (const hazard of hazards) {
+    const pingType = PING_TYPES[hazard.type];
     if (!hazard.active) {
       const progress = clamp(hazard.ageMs / hazard.telegraphMs, 0, 1);
       const radius = lerp(44, hazard.radius + 6, progress);
       ctx.beginPath();
-      ctx.strokeStyle = `rgba(255, 186, 92, ${0.4 + Math.sin(hazard.ageMs * 0.02) * 0.2})`;
+      const pulseAlpha = 0.35 + Math.sin(hazard.ageMs * 0.02) * 0.16;
+      ctx.strokeStyle = hexToRgba(pingType.color, pulseAlpha);
       ctx.lineWidth = 3;
       ctx.arc(hazard.x, hazard.y, radius, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.font = "700 17px Trebuchet MS, sans-serif";
+      ctx.fillStyle = pingType.color;
+      ctx.fillText(pingType.icon, hazard.x - 4, hazard.y + 5);
       continue;
     }
 
     const glow = 0.45 + Math.sin(hazard.ageMs * 0.02) * 0.2;
     ctx.beginPath();
-    ctx.fillStyle = `rgba(255, 108, 108, ${glow})`;
+    ctx.fillStyle = hexToRgba(pingType.color, glow);
     ctx.arc(hazard.x, hazard.y, hazard.radius + 5, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.beginPath();
-    ctx.fillStyle = "#ff7b7b";
+    ctx.fillStyle = pingType.color;
     ctx.arc(hazard.x, hazard.y, hazard.radius, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.font = "700 16px Trebuchet MS, sans-serif";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+    ctx.fillText(pingType.icon, hazard.x - 4, hazard.y + 5);
   }
 }
 
-function drawPulses() {
-  for (const pulse of pulses) {
-    const progress = pulse.ageMs / pulse.lifeMs;
-    const radius = pulse.maxRadius * progress;
+function drawPingBursts() {
+  for (const burst of pingBursts) {
+    const progress = burst.ageMs / burst.lifeMs;
+    const radius = burst.maxRadius * progress;
+    const pingType = PING_TYPES[burst.type];
     ctx.beginPath();
-    ctx.strokeStyle = `rgba(117, 246, 186, ${1 - progress})`;
+    ctx.strokeStyle = hexToRgba(pingType.color, 1 - progress);
     ctx.lineWidth = 6 - progress * 4;
-    ctx.arc(pulse.x, pulse.y, radius, 0, Math.PI * 2);
+    ctx.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
     ctx.stroke();
+
+    ctx.font = "700 20px Trebuchet MS, sans-serif";
+    ctx.fillStyle = hexToRgba(pingType.color, 1 - progress * 0.6);
+    ctx.fillText(pingType.icon, burst.x - 6, burst.y + 7);
   }
 }
 
@@ -398,11 +436,29 @@ function drawOverlayText() {
   ctx.font = "600 22px Trebuchet MS, sans-serif";
   ctx.fillText(`Hazards Cleared: ${score}`, 24, WORLD_HEIGHT - 26);
 
-  const pulseText = actionCooldownMs <= 0
-    ? "Pulse: READY [SPACE]"
-    : `Pulse Cooldown: ${(actionCooldownMs / 1000).toFixed(1)}s`;
-  ctx.fillStyle = actionCooldownMs <= 0 ? "rgba(126, 240, 181, 0.95)" : "rgba(255, 185, 122, 0.95)";
-  ctx.fillText(pulseText, WORLD_WIDTH - 280, WORLD_HEIGHT - 26);
+  const selected = PING_TYPES[selectedPingType];
+  const pingText = pingCooldownMs <= 0
+    ? `${selected.label} ${selected.icon}: READY [SPACE]`
+    : `${selected.label} ${selected.icon}: ${(pingCooldownMs / 1000).toFixed(1)}s`;
+
+  ctx.fillStyle = pingCooldownMs <= 0 ? selected.color : "rgba(255, 198, 125, 0.95)";
+  ctx.fillText(pingText, WORLD_WIDTH - 340, WORLD_HEIGHT - 26);
+}
+
+function drawPingLegend() {
+  let offsetX = 22;
+  const offsetY = 44;
+
+  for (const type of PING_TYPE_ORDER) {
+    const spec = PING_TYPES[type];
+    const active = selectedPingType === type;
+    const label = `[${spec.key}] ${spec.label} ${spec.icon}`;
+
+    ctx.font = "700 15px Trebuchet MS, sans-serif";
+    ctx.fillStyle = active ? spec.color : "rgba(240, 248, 255, 0.72)";
+    ctx.fillText(label, offsetX, offsetY);
+    offsetX += ctx.measureText(label).width + 18;
+  }
 }
 
 function clamp(value, min, max) {
@@ -411,4 +467,13 @@ function clamp(value, min, max) {
 
 function lerp(a, b, t) {
   return a + (b - a) * clamp(t, 0, 1);
+}
+
+function hexToRgba(hex, alpha) {
+  const clean = hex.replace("#", "");
+  const bigint = Number.parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
