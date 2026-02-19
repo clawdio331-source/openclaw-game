@@ -14,6 +14,15 @@ import {
   keyToPingType,
   applyPingBurstToHazards
 } from "./ping-system.js";
+import {
+  FIRST_WAVE_DURATION_MS,
+  FIRST_WAVE_SPAWN_MS,
+  STUTTER_SAMPLE_WEIGHT,
+  clampTelegraphMs,
+  isInFirstWave,
+  shouldEnableLowFx,
+  getParallaxBandCount
+} from "./visual-tuning.js";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -32,11 +41,12 @@ const endScore = document.getElementById("endScore");
 const WORLD_WIDTH = canvas.width;
 const WORLD_HEIGHT = canvas.height;
 const PLAYER_SPEED = 360;
-const HAZARD_BASE_SPAWN_MS = 900;
-const HAZARD_MIN_SPAWN_MS = 440;
+const HAZARD_BASE_SPAWN_MS = 860;
+const HAZARD_MIN_SPAWN_MS = 390;
 const TRUST_DRAIN_PER_SECOND = 28;
 
 const keysDown = new Set();
+const backdropNodes = buildBackdropNodes(72);
 
 let runState = createRunState();
 let runActive = false;
@@ -46,6 +56,11 @@ let score = 0;
 let pingCooldownMs = 0;
 let selectedPingType = "warn";
 let spawnAccumulatorMs = 0;
+let firstWaveAccumulatorMs = 0;
+let alertFlashMs = 0;
+let shakePower = 0;
+let avgFrameMs = 16;
+let lowFxMode = false;
 let lastFrameMs = performance.now();
 let visualClockMs = 0;
 
@@ -91,6 +106,9 @@ function startRun() {
   pingCooldownMs = 0;
   selectedPingType = "warn";
   spawnAccumulatorMs = 0;
+  firstWaveAccumulatorMs = 0;
+  alertFlashMs = 640;
+  shakePower = 5.5;
   visualClockMs = 0;
 
   player.x = WORLD_WIDTH * 0.5;
@@ -117,6 +135,9 @@ function endRun() {
 function frame(timestampMs) {
   const deltaMs = Math.min(40, Math.max(0, timestampMs - lastFrameMs));
   lastFrameMs = timestampMs;
+
+  avgFrameMs = lerp(avgFrameMs, deltaMs, STUTTER_SAMPLE_WEIGHT);
+  lowFxMode = shouldEnableLowFx(avgFrameMs);
   visualClockMs += deltaMs;
 
   if (runActive) {
@@ -140,6 +161,9 @@ function update(deltaMs) {
   spawnHazards(deltaMs);
   updateHazards(deltaMs);
   updatePingBursts(deltaMs);
+
+  alertFlashMs = Math.max(0, alertFlashMs - deltaMs);
+  shakePower = Math.max(0, shakePower - deltaMs * 0.0078);
 
   if (runState.ended) {
     endRun();
@@ -199,11 +223,25 @@ function spawnHazards(deltaMs) {
 
   while (spawnAccumulatorMs >= spawnRate) {
     spawnAccumulatorMs -= spawnRate;
-    hazards.push(createHazard());
+    hazards.push(createHazard({ speedBonus: 12 }));
+  }
+
+  if (isInFirstWave(runState.elapsedMs)) {
+    firstWaveAccumulatorMs += deltaMs;
+    while (firstWaveAccumulatorMs >= FIRST_WAVE_SPAWN_MS) {
+      firstWaveAccumulatorMs -= FIRST_WAVE_SPAWN_MS;
+      hazards.push(createHazard({ telegraphBiasMs: -180, speedBonus: 24, introThreat: true }));
+      if (!lowFxMode && Math.random() > 0.56) {
+        hazards.push(createHazard({ telegraphBiasMs: -140, speedBonus: 14, introThreat: true }));
+      }
+      triggerVisualSurge(180, 1.6);
+    }
+  } else {
+    firstWaveAccumulatorMs = 0;
   }
 }
 
-function createHazard() {
+function createHazard(options = {}) {
   const edge = Math.floor(Math.random() * 4);
   const type = PING_TYPE_ORDER[Math.floor(Math.random() * PING_TYPE_ORDER.length)];
   let x = 0;
@@ -228,17 +266,21 @@ function createHazard() {
     safe: 124,
     risk: 156
   };
-  const speed = (speedByType[type] ?? 135) + Math.random() * 62;
+
+  const telegraphMs = clampTelegraphMs((640 + Math.random() * 200) + (options.telegraphBiasMs ?? 0));
+  const speed = (speedByType[type] ?? 136) + Math.random() * 52 + (options.speedBonus ?? 0);
+
   return {
     type,
     x,
     y,
     vx: 0,
     vy: 0,
-    radius: 16 + Math.random() * 8,
+    radius: 15 + Math.random() * 8,
     speed,
     ageMs: 0,
-    telegraphMs: 700 + Math.random() * 300,
+    telegraphMs,
+    introThreat: options.introThreat ?? false,
     active: false
   };
 }
@@ -251,6 +293,9 @@ function updateHazards(deltaMs) {
     hazard.ageMs += deltaMs;
     if (!hazard.active && hazard.ageMs >= hazard.telegraphMs) {
       hazard.active = true;
+      if (hazard.introThreat) {
+        triggerVisualSurge(140, 1.25);
+      }
     }
 
     if (!hazard.active) {
@@ -303,6 +348,7 @@ function updatePingBursts(deltaMs) {
       hazards = result.hazards;
       score += result.clearedCount;
       runState = applyTrustDelta(runState, result.trustDelta);
+      triggerVisualSurge(120, 0.9);
       if (runState.ended) {
         return;
       }
@@ -322,6 +368,10 @@ function updateHud() {
 
 function render() {
   ctx.clearRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+  ctx.save();
+  applyShake();
+
   drawBackground();
   drawArenaFrame();
   drawPingLegend();
@@ -329,40 +379,66 @@ function render() {
   drawPingBursts();
   drawPlayer();
   drawOverlayText();
+  drawFirstWaveBanner();
+
+  ctx.restore();
+
+  if (alertFlashMs > 0) {
+    const alpha = Math.min(0.26, (alertFlashMs / 220) * 0.22);
+    ctx.fillStyle = `rgba(188, 246, 255, ${alpha})`;
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  }
 }
 
 function drawBackground() {
   const t = visualClockMs / 1000;
   const gradient = ctx.createLinearGradient(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-  gradient.addColorStop(0, "#061520");
-  gradient.addColorStop(0.5, "#0b2435");
-  gradient.addColorStop(1, "#183847");
+  gradient.addColorStop(0, "#04131c");
+  gradient.addColorStop(0.4, "#0a2432");
+  gradient.addColorStop(1, "#173c4d");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-  ctx.globalAlpha = 0.28;
-  for (let i = 0; i < 26; i += 1) {
-    const y = (i / 25) * WORLD_HEIGHT;
-    const drift = Math.sin(t * 0.7 + i) * 38;
-    ctx.fillStyle = i % 2 === 0 ? "#56d7be" : "#f9b871";
-    ctx.fillRect(drift - 120, y, WORLD_WIDTH + 240, 1);
+  const bandCount = getParallaxBandCount(lowFxMode);
+  for (let i = 0; i < bandCount; i += 1) {
+    const depth = i / Math.max(1, bandCount - 1);
+    const speed = 26 + depth * 92;
+    const y = ((i * 30 + t * speed) % (WORLD_HEIGHT + 90)) - 45;
+    const drift = Math.sin(t * (0.5 + depth * 1.3) + i) * (30 + depth * 65);
+
+    ctx.globalAlpha = 0.2 + depth * 0.12;
+    ctx.fillStyle = i % 2 === 0 ? "#58dcc5" : "#ffbd73";
+    ctx.fillRect(-160 + drift, y, WORLD_WIDTH + 320, 1 + depth * 2.4);
+  }
+
+  const nodeLimit = lowFxMode ? 22 : backdropNodes.length;
+  for (let i = 0; i < nodeLimit; i += 1) {
+    const node = backdropNodes[i];
+    const nx = node.x + Math.sin(t * (0.45 + node.depth) + node.phase) * 42 * node.depth;
+    const ny = ((node.y + t * node.speed) % (WORLD_HEIGHT + 120)) - 60;
+
+    ctx.globalAlpha = 0.16 + node.depth * 0.32;
+    ctx.fillStyle = node.color;
+    ctx.beginPath();
+    ctx.arc(nx, ny, node.size, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
 
-  const introPower = 1 - clamp((runState.elapsedMs - 10_000) / 4_000, 0, 1);
-  if (introPower > 0) {
-    const pulseRadius = 220 + Math.sin(t * 6) * 24;
-    ctx.globalAlpha = 0.22 * introPower;
+  if (isInFirstWave(runState.elapsedMs)) {
+    const introPower = 1 - clamp((runState.elapsedMs - FIRST_WAVE_DURATION_MS) / 1200, 0, 1);
+    ctx.globalAlpha = 0.14 * introPower;
+    const pulseRadius = 200 + Math.sin(t * 5.2) * 44;
+    ctx.fillStyle = "#95f6d2";
     ctx.beginPath();
-    ctx.fillStyle = "#5af1c4";
-    ctx.arc(WORLD_WIDTH * 0.5, WORLD_HEIGHT * 0.48, pulseRadius, 0, Math.PI * 2);
+    ctx.arc(WORLD_WIDTH * 0.5, WORLD_HEIGHT * 0.5, pulseRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
 }
 
 function drawArenaFrame() {
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.strokeStyle = lowFxMode ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.28)";
   ctx.lineWidth = 3;
   ctx.strokeRect(10, 10, WORLD_WIDTH - 20, WORLD_HEIGHT - 20);
 }
@@ -372,23 +448,37 @@ function drawHazards() {
     const pingType = PING_TYPES[hazard.type];
     if (!hazard.active) {
       const progress = clamp(hazard.ageMs / hazard.telegraphMs, 0, 1);
-      const radius = lerp(44, hazard.radius + 6, progress);
+      const radius = lerp(62, hazard.radius + 8, progress);
+      const pulseAlpha = 0.42 + Math.sin(hazard.ageMs * 0.027) * 0.15;
+
       ctx.beginPath();
-      const pulseAlpha = 0.35 + Math.sin(hazard.ageMs * 0.02) * 0.16;
       ctx.strokeStyle = hexToRgba(pingType.color, pulseAlpha);
       ctx.lineWidth = 3;
       ctx.arc(hazard.x, hazard.y, radius, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.font = "700 17px Trebuchet MS, sans-serif";
-      ctx.fillStyle = pingType.color;
-      ctx.fillText(pingType.icon, hazard.x - 4, hazard.y + 5);
+
+      const dirX = player.x - hazard.x;
+      const dirY = player.y - hazard.y;
+      const length = Math.hypot(dirX, dirY) || 1;
+      const tx = hazard.x + (dirX / length) * (radius + 8);
+      const ty = hazard.y + (dirY / length) * (radius + 8);
+      ctx.strokeStyle = hexToRgba(pingType.color, 0.32);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hazard.x, hazard.y);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+
+      ctx.font = "700 20px Trebuchet MS, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillText(pingType.icon, hazard.x - 5, hazard.y + 7);
       continue;
     }
 
     const glow = 0.45 + Math.sin(hazard.ageMs * 0.02) * 0.2;
     ctx.beginPath();
     ctx.fillStyle = hexToRgba(pingType.color, glow);
-    ctx.arc(hazard.x, hazard.y, hazard.radius + 5, 0, Math.PI * 2);
+    ctx.arc(hazard.x, hazard.y, hazard.radius + 6, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.beginPath();
@@ -407,6 +497,7 @@ function drawPingBursts() {
     const progress = burst.ageMs / burst.lifeMs;
     const radius = burst.maxRadius * progress;
     const pingType = PING_TYPES[burst.type];
+
     ctx.beginPath();
     ctx.strokeStyle = hexToRgba(pingType.color, 1 - progress);
     ctx.lineWidth = 6 - progress * 4;
@@ -443,6 +534,12 @@ function drawOverlayText() {
 
   ctx.fillStyle = pingCooldownMs <= 0 ? selected.color : "rgba(255, 198, 125, 0.95)";
   ctx.fillText(pingText, WORLD_WIDTH - 340, WORLD_HEIGHT - 26);
+
+  if (lowFxMode) {
+    ctx.font = "600 12px Trebuchet MS, sans-serif";
+    ctx.fillStyle = "rgba(224, 232, 241, 0.72)";
+    ctx.fillText("LOW FX MODE", WORLD_WIDTH - 112, 28);
+  }
 }
 
 function drawPingLegend() {
@@ -459,6 +556,54 @@ function drawPingLegend() {
     ctx.fillText(label, offsetX, offsetY);
     offsetX += ctx.measureText(label).width + 18;
   }
+}
+
+function drawFirstWaveBanner() {
+  if (!runActive || !isInFirstWave(runState.elapsedMs)) {
+    return;
+  }
+
+  const remainMs = Math.max(0, FIRST_WAVE_DURATION_MS - runState.elapsedMs);
+  const introAlpha = 0.25 + Math.sin(visualClockMs * 0.013) * 0.08;
+
+  ctx.fillStyle = `rgba(255, 230, 182, ${introAlpha})`;
+  ctx.font = "700 26px Trebuchet MS, sans-serif";
+  ctx.fillText("FIRST WAVE", WORLD_WIDTH * 0.5 - 84, 78);
+
+  ctx.fillStyle = "rgba(244, 249, 255, 0.86)";
+  ctx.font = "600 16px Trebuchet MS, sans-serif";
+  ctx.fillText(`Threat surge ${(remainMs / 1000).toFixed(1)}s`, WORLD_WIDTH * 0.5 - 82, 100);
+}
+
+function triggerVisualSurge(flashMs, shakeBoost) {
+  alertFlashMs = Math.max(alertFlashMs, flashMs);
+  shakePower = Math.max(shakePower, shakeBoost);
+}
+
+function applyShake() {
+  if (!runActive || shakePower <= 0) {
+    return;
+  }
+  const x = (Math.random() - 0.5) * shakePower * 2;
+  const y = (Math.random() - 0.5) * shakePower * 2;
+  ctx.translate(x, y);
+}
+
+function buildBackdropNodes(count) {
+  const nodes = [];
+  for (let i = 0; i < count; i += 1) {
+    const depth = 0.2 + Math.random() * 0.95;
+    nodes.push({
+      x: Math.random() * WORLD_WIDTH,
+      y: Math.random() * WORLD_HEIGHT,
+      depth,
+      phase: Math.random() * Math.PI * 2,
+      speed: 16 + depth * 54,
+      size: 0.9 + depth * 2.6,
+      color: i % 2 === 0 ? "#84edd7" : "#ffd49d"
+    });
+  }
+  return nodes;
 }
 
 function clamp(value, min, max) {
