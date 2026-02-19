@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenClaw Panic Protocol - G-001</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app">
+    <section class="hud">
+      <div class="trust-wrap" aria-live="polite">
+        <p class="label">Trust</p>
+        <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+          <div id="trustFill" class="meter-fill"></div>
+        </div>
+      </div>
+      <div class="timer-wrap">
+        <p class="label">Time Left</p>
+        <p id="timeLeft" class="timer-value">60.0s</p>
+      </div>
+    </section>
+
+    <section class="stage-wrap">
+      <canvas id="gameCanvas" width="1280" height="720" aria-label="OpenClaw game stage"></canvas>
+
+      <div id="introOverlay" class="overlay intro-overlay">
+        <h1>OpenClaw Panic Protocol</h1>
+        <p class="intro-line">Stay alive for 60 seconds. If Trust hits 0, the run ends instantly.</p>
+        <ul>
+          <li>Move: <strong>WASD</strong> or <strong>Arrow Keys</strong></li>
+          <li>Action: <strong>Space</strong> for pulse blast</li>
+        </ul>
+        <button id="startRunButton" type="button">Start Run</button>
+      </div>
+
+      <div id="endOverlay" class="overlay end-overlay hidden">
+        <h2 id="endTitle">Run Complete</h2>
+        <p id="endReason"></p>
+        <p id="endScore"></p>
+        <button id="restartRunButton" type="button">Play Again</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/game.js"></script>
+</body>
+</html>
