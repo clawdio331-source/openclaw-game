@@ -36,10 +36,18 @@
       </div>
 
       <div id="endOverlay" class="overlay end-overlay hidden">
-        <h2 id="endTitle">Run Complete</h2>
-        <p id="endReason"></p>
-        <p id="endScore"></p>
-        <button id="restartRunButton" type="button">Play Again</button>
+        <div class="end-card">
+          <p class="end-kicker">OpenClaw Incident Card</p>
+          <h2 id="endTitle">Run Complete</h2>
+          <p id="endCause" class="end-cause"></p>
+          <div class="end-stats">
+            <p><span>Score</span><strong id="endScore">0</strong></p>
+            <p><span>Trust Streak</span><strong id="endStreak">0</strong></p>
+            <p><span>Daily Seed</span><strong id="endSeed">00000000-0000</strong></p>
+          </div>
+          <p id="endReason" class="end-reason"></p>
+          <button id="restartRunButton" type="button">Play Again</button>
+        </div>
       </div>
     </section>
   </main>
