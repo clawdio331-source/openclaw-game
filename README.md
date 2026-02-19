@@ -2,7 +2,7 @@
 
 Short-session 2D prototype for human + OpenClaw agent play.
 
-## Current Prototype (G-003)
+## Current Prototype (G-004)
 
 Implements the core run loop plus ping system:
 - move with `WASD` or arrow keys
@@ -11,7 +11,8 @@ Implements the core run loop plus ping system:
 - pings are cooldown-bound and time-limited with distinct color/icon VFX
 - matching ping-to-threat correctly increases Trust
 - always-visible Trust meter
-- first 10 seconds run an explicit \"first wave\" visual surge with parallax motion and threat telegraphs
+- first 10 seconds run an explicit "first wave" visual surge with parallax motion and threat telegraphs
+- end card appears after every run with score, trust streak, daily seed, and a funny fail line
 - run ends at `60s` or immediately when Trust hits `0`
 
 ## Run Locally

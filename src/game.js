@@ -23,6 +23,7 @@ import {
   shouldEnableLowFx,
   getParallaxBandCount
 } from "./visual-tuning.js";
+import { createDailySeed, buildFunnyFailReason } from "./end-card.js";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
@@ -36,7 +37,10 @@ const meter = document.querySelector(".meter");
 const timeLeft = document.getElementById("timeLeft");
 const endTitle = document.getElementById("endTitle");
 const endReason = document.getElementById("endReason");
+const endCause = document.getElementById("endCause");
 const endScore = document.getElementById("endScore");
+const endStreak = document.getElementById("endStreak");
+const endSeed = document.getElementById("endSeed");
 
 const WORLD_WIDTH = canvas.width;
 const WORLD_HEIGHT = canvas.height;
@@ -55,6 +59,8 @@ let pingBursts = [];
 let score = 0;
 let pingCooldownMs = 0;
 let selectedPingType = "warn";
+let trustStreak = 0;
+let bestTrustStreak = 0;
 let spawnAccumulatorMs = 0;
 let firstWaveAccumulatorMs = 0;
 let alertFlashMs = 0;
@@ -105,6 +111,8 @@ function startRun() {
   score = 0;
   pingCooldownMs = 0;
   selectedPingType = "warn";
+  trustStreak = 0;
+  bestTrustStreak = 0;
   spawnAccumulatorMs = 0;
   firstWaveAccumulatorMs = 0;
   alertFlashMs = 640;
@@ -122,13 +130,23 @@ function startRun() {
 function endRun() {
   runActive = false;
   const survived = (runState.elapsedMs / 1000).toFixed(1);
-  const reasonText = runState.endReason === "trust"
-    ? "Trust collapsed to zero before extraction."
-    : "You held the line for the full 60 seconds.";
+  const dailySeed = createDailySeed();
+  const causeText = runState.endReason === "trust"
+    ? `Trust collapsed at ${survived}s.`
+    : `Full extraction after ${survived}s.`;
+  const funnyReason = buildFunnyFailReason({
+    endReason: runState.endReason,
+    score,
+    streak: bestTrustStreak,
+    seed: dailySeed
+  });
 
   endTitle.textContent = runState.endReason === "trust" ? "Trust Depleted" : "Mission Survived";
-  endReason.textContent = `${reasonText} Total survival time: ${survived}s`;
-  endScore.textContent = `Hazards neutralized: ${score}`;
+  endCause.textContent = causeText;
+  endScore.textContent = String(score);
+  endStreak.textContent = String(bestTrustStreak);
+  endSeed.textContent = dailySeed;
+  endReason.textContent = funnyReason;
   endOverlay.classList.remove("hidden");
 }
 
@@ -210,6 +228,7 @@ function triggerPing() {
     type: selectedPingType,
     x: player.x,
     y: player.y,
+    scored: false,
     ageMs: 0,
     lifeMs: PING_LIFE_MS,
     maxRadius: PING_MAX_RADIUS
@@ -321,15 +340,25 @@ function updateHazards(deltaMs) {
 
   if (trustDelta !== 0) {
     runState = applyTrustDelta(runState, trustDelta);
+    if (trustDelta < 0) {
+      trustStreak = 0;
+    }
   }
 }
 
 function updatePingBursts(deltaMs) {
+  let missedPing = false;
   for (const burst of pingBursts) {
     burst.ageMs += deltaMs;
+    if (burst.ageMs >= burst.lifeMs && !burst.scored) {
+      missedPing = true;
+    }
   }
 
   pingBursts = pingBursts.filter((burst) => burst.ageMs < burst.lifeMs);
+  if (missedPing) {
+    trustStreak = 0;
+  }
 
   if (pingBursts.length === 0 || hazards.length === 0) {
     return;
@@ -348,6 +377,11 @@ function updatePingBursts(deltaMs) {
       hazards = result.hazards;
       score += result.clearedCount;
       runState = applyTrustDelta(runState, result.trustDelta);
+      if (!burst.scored) {
+        burst.scored = true;
+        trustStreak += 1;
+        bestTrustStreak = Math.max(bestTrustStreak, trustStreak);
+      }
       triggerVisualSurge(120, 0.9);
       if (runState.ended) {
         return;
@@ -526,6 +560,9 @@ function drawOverlayText() {
   ctx.fillStyle = "rgba(242, 250, 255, 0.94)";
   ctx.font = "600 22px Trebuchet MS, sans-serif";
   ctx.fillText(`Hazards Cleared: ${score}`, 24, WORLD_HEIGHT - 26);
+  ctx.font = "600 16px Trebuchet MS, sans-serif";
+  ctx.fillStyle = "rgba(214, 248, 238, 0.92)";
+  ctx.fillText(`Trust Streak: ${trustStreak}  Best: ${bestTrustStreak}`, 24, WORLD_HEIGHT - 50);
 
   const selected = PING_TYPES[selectedPingType];
   const pingText = pingCooldownMs <= 0

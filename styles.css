@@ -130,6 +130,69 @@ body {
   gap: 5px;
 }
 
+.end-card {
+  width: min(560px, 90vw);
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(132, 240, 216, 0.17), transparent 38%),
+    radial-gradient(circle at 80% 0%, rgba(255, 204, 136, 0.16), transparent 44%),
+    rgba(5, 15, 24, 0.84);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+}
+
+.end-kicker {
+  margin: 0;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  opacity: 0.8;
+}
+
+.end-cause {
+  margin: 0;
+  font-size: 1rem;
+  color: #d7fff0;
+}
+
+.end-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.end-stats p {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: grid;
+  gap: 5px;
+}
+
+.end-stats span {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.8;
+}
+
+.end-stats strong {
+  font-size: 1rem;
+  color: #fff2cc;
+}
+
+.end-reason {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: #eaf8ff;
+}
+
 button {
   border: none;
   border-radius: 999px;
@@ -158,5 +221,9 @@ button:hover {
 
   .timer-wrap {
     text-align: left;
+  }
+
+  .end-stats {
+    grid-template-columns: 1fr;
   }
 }
